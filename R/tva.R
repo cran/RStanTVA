@@ -41,7 +41,7 @@ get_prior <- function(priors, class, dpar = NA_character_, group = NA_character_
 }
 
 deparse_prior <- function(prior) {
-  if(nrow(prior) == 0) {
+  if(is.null(prior) || nrow(prior) == 0) {
     return(NULL)
   } else if(nrow(prior) == 1)  {
     args <- list(str2lang(prior$prior))
@@ -50,7 +50,7 @@ deparse_prior <- function(prior) {
     for(arg in c("lb","ub")) if(!is.na(prior[[arg]])) args[[arg]] <- prior[[arg]]
     return(as.call(c(list(as.name("prior")), args)))
   } else {
-    return(call("+", sys.function()(prior[1,]),sys.function()(prior[-1,])))
+    return(call("+", sys.function()(prior[seq_len(nrow(prior)-1),]),sys.function()(prior[nrow(prior),])))
   }
 }
 
@@ -398,6 +398,7 @@ stantva_code <- function(formula = NULL, locations, task = c("wr","pr"), regions
   for(x in formalArgs(sys.function())) {
     if(x %in% c("data","type")) next
     val <- get(x)
+    if(x == "priors") val <- deparse_prior(val)
     call_args[x] <- if(is.numeric(val) || is.character(val) || is.logical(val)) as.character(val) else deparse1(val)
     call_args_list[[x]] <- val
   }
@@ -1319,7 +1320,7 @@ setClass("stantvafit", contains = "stanfit", slots = c("stanmodel" = "stantvamod
 setMethod("show", c(object="stantvamodel"), function(object) {
   cat(col_cyan("StanTVA"), "model with", length(object@code@df),"free parameter(s) and the following configuration:\n")
   for(cname in names(object@code@config)) {
-    cat(ansi_strwrap(paste0("- ",col_magenta(cname)," = ",deparse1(object@code@config[[cname]])), indent = 2, exdent = 6),sep="\n")
+    cat(ansi_strwrap(paste0("- ",col_magenta(cname)," = ",deparse1(if(cname == "priors") deparse_prior(object@code@config$priors) else object@code@config[[cname]])), indent = 2, exdent = 6),sep="\n")
   }
   invisible(object)
 })
@@ -1475,9 +1476,10 @@ setMethod("logLik", "stantvafit", function(object) {
   eval(
     substitute(
       {
-        f@model_pars <- setdiff(f@model_pars, p)
+        f@sim$pars_oi <- f@model_pars <- setdiff(f@model_pars, p)
+        we <- grepl(paste0("^(",paste0(p,collapse="|"),")\\["),f@sim$fnames_oi)
+        f@sim$fnames_oi <- f@sim$fnames_oi[!we]
         f@par_dims <- f@par_dims[f@model_pars]
-        f@sim$pars_oi <- f@model_pars
         for(i in seq_along(f@sim$samples)) {
           we <- grepl(paste0("^(",paste0(p,collapse="|"),")\\["),names(f@sim$samples[[i]]))
           f@sim$samples[[i]] <- f@sim$samples[[i]][names(f@sim$samples[[i]])[!we]]
@@ -1808,6 +1810,10 @@ setMethod("print", "stantvafit", function(x, digits_summary = 2, ...) {
 
   par_names <- names(x)
 
+  data <- x@data
+
+  x <- as(x, "stanfit")
+
   sampler <- attr(x@sim$samples[[1]], "args")$sampler_t
 
   cat(col_cyan("StanTVA"), "model with", length(x@stanmodel@code@df), "free parameter(s), fitted with ")
@@ -1818,8 +1824,12 @@ setMethod("print", "stantvafit", function(x, digits_summary = 2, ...) {
   heading <- function(txt) cat("\n", style_underline(style_bold(txt)), "\n", sep = "")
 
   heading("Model configuration:")
-  cat(sprintf("%s = %s\n", names(x@stanmodel@code@config), vapply(x@stanmodel@code@config, function(x) deparse1(x), character(1))), sep = "")
-
+  for(n in names(x@stanmodel@code@config)) {
+    cat(n,"= ")
+    if(n == "priors") cat(deparse1(deparse_prior(x@stanmodel@code@config$prior)))
+    else cat(deparse1(x@stanmodel@code@config[[n]]))
+    cat("\n")
+  }
 
   fx <- bind_rows(lapply(x@stanmodel@code@config$formula, parse_formula))
 
@@ -1860,7 +1870,7 @@ setMethod("print", "stantvafit", function(x, digits_summary = 2, ...) {
 
     for(rf in random_factors_txt) {
 
-      heading(paste0("Hyperparameters on random effects (", col_blue(deparse1(rfs$factor[[match(rf, rfs$factor_txt)]])), " level, N = ", x@data[[paste0("N_",rf)]] ,"):"))
+      heading(paste0("Hyperparameters on random effects (", col_blue(deparse1(rfs$factor[[match(rf, rfs$factor_txt)]])), " level, N = ", data[[paste0("N_",rf)]] ,"):"))
 
 
 
@@ -1976,7 +1986,51 @@ translate_names <- function(model, data, names) {
 #'@description Returns the names of the fitted model parameters.
 #'@param x The StanTVA fit.
 #'@return The list of parameter names and aliases.
+#'@examples
+#'\donttest{
+#'f <- read_stantva_fit("fit.rds")
+#'names(f)
+#'}
 #'@export
 setMethod("names", "stantvafit", function(x) translate_names(x@stanmodel, x@data, x@sim$fnames_oi))
 
 
+#'Extract samples from a fitted RStanTVA model
+#'@description Returns posterior samples from a fitted RStanTVA model.
+#'@param object The RStanTVA fit.
+#'@param pars (Optional) A character vector of variable names to extract.
+#'@param ... Additional arguments passed to \code{\link[rstan:extract]{rstan::extract()}}, e.g. \code{permuted} and \code{inc_warmup}.
+#'@return See \code{\link[rstan:extract]{rstan::extract()}} for details.
+#'@examples
+#'\donttest{
+#'f <- read_stantva_fit("fit.rds")
+#'extract(f, "C_Intercept")
+#'}
+#'@export
+setMethod("extract", c(object="stantvafit"), function(object, pars, ...) {
+  f_names <- names(object)
+  x <- if(missing(pars)) callNextMethod(object, ...) else callNextMethod(object, object@sim$fnames_oi[match(pars, alias(object))], ...)
+  if(is.list(x)) names(x) <- attr(f_names,"alias")[match(names(x), f_names)]
+  if(is.array(x)) rownames(x) <- attr(f_names,"alias")[match(dimnames(x)[1], f_names)]
+  x
+})
+
+#'Summary method for RStanTVA fits
+#'@description Summarize the distributions of estimated parameters and derived quantities using the posterior draws.
+#'@param object The RStanTVA fit.
+#'@param pars (Optional) A character vector of variable names to extract.
+#'@param ... Additional arguments passed to \code{\link[rstan:summary,stanfit-method]{rstan::summary()}}, e.g. \code{probs} and \code{use_cache}.
+#'@return See \code{\link[rstan:summary,stanfit-method]{rstan::summary()}} for details.
+#'@examples
+#'\donttest{
+#'f <- read_stantva_fit("fit.rds")
+#'summary(f, "C_Intercept", probs = c(.025, .975))
+#'}
+#'@export
+setMethod("summary", c(object="stantvafit"), function(object, pars, ...) {
+  f_names <- names(object)
+  x <- if(missing(pars)) rstan::summary(as(object,"stanfit"), ...) else rstan::summary(as(object,"stanfit"), object@sim$fnames_oi[match(pars, alias(object))], ...)
+  rownames(x$summary) <- attr(f_names,"alias")[match(rownames(x$summary), f_names)]
+  rownames(x$c_summary) <- attr(f_names,"alias")[match(rownames(x$c_summary), f_names)]
+  x
+})
