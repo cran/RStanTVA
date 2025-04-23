@@ -6,6 +6,10 @@
 <!-- badges: start -->
 
 [![R](https://github.com/mmrabe/RStanTVA/actions/workflows/rpkg.yml/badge.svg)](https://github.com/mmrabe/RStanTVA/actions/workflows/rpkg.yml)
+[![Lifecycle:
+experimental](https://img.shields.io/badge/lifecycle-experimental-orange.svg)](https://lifecycle.r-lib.org/articles/stages.html#experimental)
+[![CRAN
+status](https://www.r-pkg.org/badges/version/RStanTVA)](https://CRAN.R-project.org/package=RStanTVA)
 <!-- badges: end -->
 
 RStanTVA is an R package containing the StanTVA library and numerous
@@ -14,7 +18,13 @@ convenience functions for generating, compiling, fitting, and analyzing
 
 ## Installation
 
-You can install the development version of RStanTVA from
+The latest version of the package can be installed from CRAN using:
+
+``` r
+install.packages("RStanTVA")
+```
+
+Alternatively, you can install the development version of RStanTVA from
 [GitHub](https://github.com/mmrabe/RStanTVA) with:
 
 ``` r
@@ -26,20 +36,32 @@ remotes::install_github("mmrabe/RStanTVA")
 ``` r
 library(RStanTVA)
 library(tidyverse)
-#> ── Attaching core tidyverse packages ──────────────────────── tidyverse 2.0.0 ──
-#> ✔ dplyr     1.1.4     ✔ readr     2.1.5
-#> ✔ forcats   1.0.0     ✔ stringr   1.5.1
-#> ✔ ggplot2   3.5.0     ✔ tibble    3.2.1
-#> ✔ lubridate 1.9.3     ✔ tidyr     1.3.1
-#> ✔ purrr     1.0.2     
-#> ── Conflicts ────────────────────────────────────────── tidyverse_conflicts() ──
-#> ✖ tidyr::extract() masks rstan::extract()
-#> ✖ dplyr::filter()  masks stats::filter()
-#> ✖ dplyr::lag()     masks stats::lag()
-#> ℹ Use the conflicted package (<http://conflicted.r-lib.org/>) to force all conflicts to become errors
 ```
 
 ## Example data set
+
+The functions in this package use a relatively simplistic data format.
+For an experiment with $n$ trials and $m$ display locations, the data
+should be represented as a `list` or `tibble` with the following
+columns/elements:
+
+- `S`: An $n \times m$ matrix with values `TRUE` or `1` wherever a
+  stimulus was displayed, otherwise `FALSE` or `0`. If stimuli were
+  displayed in all $m$ display locations in all $n$ trials, this would
+  simply be `matrix(TRUE,n,m)`.
+- `R`: An $n \times m$ matrix with values `TRUE` or `1` for every
+  correctly reported *target* location, otherwise `FALSE` or `0`. This
+  must be `FALSE`/`0` where `S` is `FALSE`/`0` or `D` (see below) is
+  `TRUE`/`1`, otherwise will throw an error.
+- `D`: An $n \times m$ matrix with values `TRUE` or `1` for every
+  location, otherwise `FALSE` or `0`. This must be `FALSE`/`0` where `S`
+  is `FALSE`/`0` or `R` (see below) is `TRUE`/`1`, otherwise will throw
+  an error. `D` is optional if *all* trials are whole report.
+  Whole-report trials can also be included by setting all `D` of the
+  respective trials to `FALSE`/`0`, since a partial report without
+  distractors is effectively a whole report.
+- `T`: An $n$-length numeric vector of exposure durations (in
+  milliseconds).
 
 ``` r
 data("tva_recovery")
@@ -49,7 +71,7 @@ data("tva_recovery_true_params")
 `RStanTVA` comes with a CombiTVA data set `tva_recovery` of 50 simulated
 subjects with 234 trials each. For each subject and trial, the true
 underlying parameters are known exactly, which makes it very useful for
-demonstrating the functionality of this package.
+demonstrating the functionality of this package:
 
 Of the 234 trials, half were carried out under the `high` condition, and
 the other half under the `low` condition. Imagine that those are maybe
@@ -508,7 +530,7 @@ subjects, experimenters, locations, devices, etc. As for the previous
 model, you may also choose to only let specific parameters vary, or just
 all of them. You can specify combine model covariance matrices to
 capture correlations between parameters (as is done below for $C$ and
-$alpha$):
+$\alpha$):
 
 ``` r
 
@@ -728,7 +750,7 @@ chains, depending on the complexity of the model:
 
 ``` r
 total_chains <- 4
-parallel_chains <- parallel_chains # can also be lower
+parallel_chains <- total_chains # can also be lower
 nthreads_per_chain <- ceiling(parallel::detectCores()/parallel_chains) # for simpler models
 nthreads_per_chain <- parallel::detectCores() # for very complex models
 rstan_options(threads_per_chain = nthreads_per_chain)
