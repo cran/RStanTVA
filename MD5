@@ -1,12 +1,12 @@
-c243a253c602327d84482188436d212a *DESCRIPTION
+52786f73aaeb3baf268839fad7712cab *DESCRIPTION
 c407cfa00d87bc2f5dc14d1d7ce9a580 *NAMESPACE
 805694bf9ea614d79325eec729a0d173 *R/RStanTVA-package.R
 e57b784a62cec15aad589e1878abe37e *R/data.R
-6e1baaeb1b1dd9fbc4c199f07adcfe01 *R/tva.R
-235a8d7364db94b459516f9ef7f4ab15 *README.md
+58cdcf8784422dee29b42832308e0eb6 *R/tva.R
+f8ea9d84ac6a64f3eea2affea869b05f *README.md
 20c8d3f97d93e2e318a22508275b5a02 *build/partial.rdb
-f3df6fff1714639594461b288699e2c2 *data/tva_recovery.rda
-5c92353a5ec61d3ac7f373b133c69811 *data/tva_recovery_true_params.rda
+cf5ef0a1c86e847efc8f5bb85d2e1462 *data/tva_recovery.rda
+71be99a97ed4d651e2db217170e4e7c9 *data/tva_recovery_true_params.rda
 1ebbd3e34237af26da5dc08a4e440464 *inst/StanTVA/LICENSE
 d862ebe0eeb3f0c97b1072c8ba9ee70d *inst/StanTVA/bernoulliK.stan
 f63df6708ec120e6f310f113c664cb2b *inst/StanTVA/betabinomialK.stan
@@ -15,7 +15,9 @@ f63df6708ec120e6f310f113c664cb2b *inst/StanTVA/betabinomialK.stan
 6af4fd184250c6172c0d6e2acb831121 *inst/StanTVA/exponentialt0.stan
 f607b15865a9c619535a1a24e0837907 *inst/StanTVA/freeK.stan
 23694ff38ee623919015dbf19a41b43d *inst/StanTVA/gaussiant0.stan
-fd3d1cda00637317432bbef50d73629a *inst/StanTVA/tva.stan
+398d15168c0734070a3ce8686753f2df *inst/StanTVA/hypergeometricK.stan
+ce4bdec6eefdf32ec775c1735f70856f *inst/StanTVA/probitK.stan
+3182b9023970924d06312c096d23ff53 *inst/StanTVA/tva.stan
 50f549d3dc7c3c3c153754e43d1a3398 *man/RStanTVA-package.Rd
 abce81a29a7469e7e4229a9e2bbebb3a *man/alias-stantvafit-method.Rd
 25fa297c5b6f33462e9273b17943d12c *man/coef-stantvafit-method.Rd
@@ -36,7 +38,7 @@ c1b9e64190edd3549505295eb0eb8533 *man/read_stantva_fit.Rd
 1769eb56718806d292ce025f4cf26869 *man/show-stantvacode-method.Rd
 22eaa1757614bbd9956339c03da572e0 *man/show-stantvamodel-method.Rd
 17023fcbb26aba40084a1a3367014c5c *man/stancsv2stantvafit.Rd
-c6d090e0d1d008d7693897cccdc9de1e *man/stantva_code.Rd
+adfc8c7aa65e48ddc580b68a11942e30 *man/stantva_code.Rd
 a29d16f26772968f412447bd40012f6d *man/stantva_model.Rd
 fbef658bf3b992ba98d7ebc6bdcf8711 *man/stantva_path.Rd
 f6fee368f7e1a370096d784d63abcbd2 *man/stantvacode-class.Rd

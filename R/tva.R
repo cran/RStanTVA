@@ -196,7 +196,6 @@ prepare_data <- function(trials, model, require_outcome = TRUE, contrasts = list
   fs <- mc@config$formula
 
   required_columns <- if(isFALSE(require_outcome)) c() else if(mc@config$task == "wr") c("R","S","T") else if(mc@config$task == "pr") c("R","S","D","T") else stop("Unsupported task ",sQuote(mc@config$task),"!")
-  if(isTRUE(mc@config$allow_guessing)) required_columns <- c(required_columns, "E", "I")
 
 
   if(any(!required_columns %in% colnames(trials))) {
@@ -365,12 +364,12 @@ parse_formula <- function(f) {
 #' @param locations The number of display locations (items).
 #' @param task The task. Currently implemented: \code{wr} (whole report) and \code{pr} (partial report)
 #' @param regions An optional list of groups of display locations (regions).
-#' @param C_mode The mode/family for the $C$ parameter.
-#' @param w_mode The mode/family for the $w$ parameter.
-#' @param t0_mode The mode/family for the $t_0$ parameter.
-#' @param K_mode The mode for the $K$ parameter.
-#' @param max_K The upper bound of $K$.
-#' @param allow_guessing (logical) Whether to allow guessing.
+#' @param C_mode The mode/family for the \eqn{C}{C} parameter.
+#' @param w_mode The mode/family for the \eqn{w}{w} parameter.
+#' @param t0_mode The mode/family for the \eqn{t_0}{t0} parameter.
+#' @param K_mode The mode for the \eqn{K}{K} parameter.
+#' @param max_K The upper bound of \eqn{K}{K}.
+#' @param fixed Named vector or list of parameters that are not to be sampled/fitted but fixed to their respective values.
 #' @param parallel (logical) Whether to use parallel chains.
 #' @param save_log_lik (logical) Whether to save the log likelihood (needed for likelihood-based model comparison such as loo).
 #' @param priors The priors.
@@ -381,7 +380,23 @@ parse_formula <- function(f) {
 #' model <- stantva_code(locations = 4, task = "pr")
 #' model
 #'@export
-stantva_code <- function(formula = NULL, locations, task = c("wr","pr"), regions = list(), C_mode = c("equal","locations","regions"), w_mode = c("locations","regions","equal"), t0_mode = c("constant", "gaussian", "exponential", "shifted_exponential"), K_mode = c("bernoulli", "free", "binomial", "betabinomial"), max_K = locations, allow_guessing = FALSE, parallel = isTRUE(rstan_options("threads_per_chain") > 1L), save_log_lik = FALSE, priors = NULL, sanity_checks = TRUE, debug_neginf_loglik = FALSE) {
+stantva_code <- function(
+    formula = NULL,
+    locations,
+    task = c("wr","pr"),
+    regions = list(),
+    C_mode = c("equal","locations","regions"),
+    w_mode = c("locations","regions","equal"),
+    t0_mode = c("constant", "gaussian", "exponential", "shifted_exponential"),
+    K_mode = c("bernoulli", "free", "binomial", "betabinomial", "hypergeometric", "probit"),
+    max_K = locations,
+    fixed = NULL,
+    parallel = isTRUE(rstan_options("threads_per_chain") > 1L),
+    save_log_lik = FALSE,
+    priors = NULL,
+    sanity_checks = TRUE,
+    debug_neginf_loglik = FALSE
+  ) {
 
   task <- match.arg(task)
   C_mode <- match.arg(C_mode)
@@ -453,6 +468,16 @@ stantva_code <- function(formula = NULL, locations, task = c("wr","pr"), regions
         prior_fixed_intercept = parameters[[name]]$prior
       )
       parameters[[name]]$hierarchical <<- hc
+    } else if(name %in% names(fixed)) {
+      parameters[[name]] <<- list(...)
+      val <- if(grepl("matrix", parameters[[name]]$type)) {
+        paste0("[",paste(vapply(seq_len(nrow(fixed[[name]])), function(i) paste0("[",paste(sprintf("%g", fixed[[name]][i,]), collapse = ", "),"]"), character(1)), collapse=", "),"]")
+      } else if(grepl("^(simplex|vector)", parameters[[name]]$type)) {
+        paste0("[",paste(sprintf("%g", fixed[[name]]), collapse = ", "),"]'")
+      } else {
+        sprintf("%g", fixed[[name]])
+      }
+      add_code("transformed parameters", sprintf("%s %s = %s;", parameters[[name]]$type, name, val))
     } else {
       parameters[[name]] <<- list(...)
       add_code(if(isTRUE(parameters[[name]]$transformed)) "transformed parameters" else "parameters", sprintf("%s %s;", parameters[[name]]$type, name))
@@ -587,7 +612,7 @@ stantva_code <- function(formula = NULL, locations, task = c("wr","pr"), regions
 
 
   if(C_mode == "equal") {
-    add_param(name = "C", type = "real<lower=machine_precision()>", ctype = "real", rtype = "real", prior = ~gamma(3.5,0.035))
+    add_param(name = "C", type = "real<lower=machine_precision()>", ctype = "real", rtype = "real", prior = ~lognormal(4.5,0.6))
     s_pars <- "C"
     s_body <- c(
       sprintf("vector[%1$d] s = rep_vector(C, %1$d);", locations)
@@ -603,7 +628,7 @@ stantva_code <- function(formula = NULL, locations, task = c("wr","pr"), regions
         })
       )
     )
-    add_param(name = "C", type = sprintf("vector<lower=machine_precision()>[%d]", length(regions)), ctype=sprintf("vector[%d]", length(regions)), rtype = "vector", dim = length(regions), prior = substitute(~gamma(a, 0.035), list(a=3.5/length(regions))))
+    add_param(name = "C", type = sprintf("vector<lower=machine_precision()>[%d]", length(regions)), ctype=sprintf("vector[%d]", length(regions)), rtype = "vector", dim = length(regions), prior = substitute(~lognormal(a, 0.6), list(a=4.5-log(length(regions)))))
     for(i in seq_along(regions)) {
       #add_code(
       #  "generated quantities",
@@ -614,7 +639,7 @@ stantva_code <- function(formula = NULL, locations, task = c("wr","pr"), regions
   } else if(C_mode == "locations") {
     s_body <- NULL
     s_pars <- "s"
-    add_param(name = "s", type = sprintf("vector<lower=machine_precision()>[%d]", locations), ctype=sprintf("vector[%d]", locations), rtype="vector", dim = locations, prior = ~gamma(3.5,0.035))
+    add_param(name = "s", type = sprintf("vector<lower=machine_precision()>[%d]", locations), ctype=sprintf("vector[%d]", locations), rtype="vector", dim = locations, prior = substitute(~lognormal(a, 0.6), list(a=4.5-log(locations))))
     for(i in seq_along(regions)) {
       #add_code(
       #  "generated quantities",
@@ -667,6 +692,11 @@ stantva_code <- function(formula = NULL, locations, task = c("wr","pr"), regions
     add_param(name = "aK", class = c("phi", "K"), type = "real<lower=machine_precision()>", ctype="real", rtype="real", dim = 1, prior = ~lognormal(0,1))
     add_param(name = "bK", class = c("phi", "K"), type = "real<lower=machine_precision()>", ctype="real", rtype="real", dim = 1, prior = ~lognormal(0,1))
     K_args <- "[aK, bK]'"
+  } else if(K_mode == "probit") {
+    add_code("functions", includeFile("probitK.stan"))
+    add_param(name = "mK", class = c("phi", "K"), type = "real", ctype="real", rtype="real", dim = 1, prior = ~normal(3.5,0.5))
+    add_param(name = "sK", class = c("phi", "K"), type = "real<lower=machine_precision()>", ctype="real", rtype="real", dim = 1, prior = ~lognormal(-0.5,0.25))
+    K_args <- "[mK, sK]'"
   } else if(K_mode == "binomial") {
     add_code("functions", includeFile("binomialK.stan"))
     add_param(name = "pK", class = c("phi", "K"), type = "real<lower=0,upper=1>", ctype="real", rtype="real", dim = 1, prior = ~beta(2,2))
@@ -698,7 +728,7 @@ stantva_code <- function(formula = NULL, locations, task = c("wr","pr"), regions
   } else if(t0_mode == "gaussian") {
     add_code("functions", includeFile("gaussiant0.stan"))
     add_param(name = "mu0", class = c("phi","t0"), type = "real", ctype="real", rtype="real", prior = ~normal(20, 15))
-    add_param(name = "sigma0", class = c("phi","t0"), type = "real<lower=machine_precision()>", ctype="real", rtype="real", prior = ~gamma(2,0.2))
+    add_param(name = "sigma0", class = c("phi","t0"), type = "real<lower=machine_precision()>", ctype="real", rtype="real", prior = ~lognormal(1.7,0.6))
     t0_args <- "[mu0, sigma0]'"
   } else if(t0_mode == "exponential") {
     # TODO implement default priors!
@@ -727,12 +757,6 @@ stantva_code <- function(formula = NULL, locations, task = c("wr","pr"), regions
   add_data(name = "S", class="x_i", type = sprintf("array[N,%d] int<lower=0,upper=1>", locations), ctype = sprintf("array[%d] int", locations), rtype="array[] int", dim = locations)
   add_data(name = "R", class="x_i", type = sprintf("array[N,%d] int<lower=0,upper=1>", locations), ctype = sprintf("array[%d] int", locations), rtype="array[] int", dim = locations)
 
-  if(allow_guessing) {
-    add_data(name = "E", class="x_i", type = "array[N] int<lower=0>", ctype = "int", rtype="int")
-    add_data(name = "I", class="x_i", type = "array[N] int<lower=0>", ctype = "int", rtype="int")
-    add_param(name = "g", class = "phi", type = "real<lower=machine_precision(),upper=1.0-machine_precision()>", ctype="real", rtype="real", prior = ~beta(2,20))
-  }
-
 
   if(task == "wr") {
     v_data <- c("nS","S")
@@ -747,19 +771,10 @@ stantva_code <- function(formula = NULL, locations, task = c("wr","pr"), regions
     )
     l_data <- union(c("S","R","T","nS"), v_data)
     l_pars <- c(v_pars, if(!is.null(parameters$t0))"t0",Filter(function(p) any(c("t0","K") %in% parameters[[p]]$class), names(parameters)))
-    if(allow_guessing) {
-      l_pars <- c(l_pars, "g")
-      l_data <- c(l_data, "E", "I")
-      l_body <- c(
-        sprintf("vector[nS] v = calculate_v(%s);", paste(c(datsig(names_back = v_data, types = FALSE), parsig(v_pars, types = FALSE)), collapse=", ")),
-        sprintf("log_lik = tva_wrg_log(R, S, %s, %s, %s, v, g, E, I);", if(is.null(parameters$t0)) "T" else "T - t0", t0_args, K_args)
-      )
-    } else {
-      l_body <- c(
-        sprintf("vector[nS] v = calculate_v(%s);", paste(c(datsig(names_back = v_data, types = FALSE), parsig(v_pars, types = FALSE)), collapse=", ")),
-        sprintf("log_lik = tva_wr_log(R, S, %s, %s, %s, v);", if(is.null(parameters$t0)) "T" else "T - t0", t0_args, K_args)
-      )
-    }
+    l_body <- c(
+      sprintf("vector[nS] v = calculate_v(%s);", paste(c(datsig(names_back = v_data, types = FALSE), parsig(v_pars, types = FALSE)), collapse=", ")),
+      sprintf("log_lik = tva_wr_log(R, S, %s, %s, %s, v);", if(is.null(parameters$t0)) "T" else "T - t0", t0_args, K_args)
+    )
     p_data <- setdiff(l_data, "R")
     p_pars <- l_pars
     p_body <- c(
@@ -794,19 +809,10 @@ stantva_code <- function(formula = NULL, locations, task = c("wr","pr"), regions
     add_param(name = "alpha", type = "real<lower=machine_precision()>", ctype = "real", rtype="real", prior = ~lognormal(-0.4,0.6))
     l_data <- union(c("S","D","R","T"), v_data)
     l_pars <- c(v_pars,if(!is.null(parameters$t0))"t0",Filter(function(p) any(c("t0","K") %in% parameters[[p]]$class), names(parameters)))
-    if(allow_guessing) {
-      l_pars <- c(l_pars, "g")
-      l_data <- c(l_data, "E", "I")
-      l_body <- c(
-        sprintf("vector[nS] v = calculate_v(%s);", paste(c(datsig(names_back = v_data, types = FALSE), parsig(v_pars, types = FALSE)), collapse=", ")),
-        sprintf("log_lik = tva_prg_log(R, S, D, %s, %s, %s, v, g, E, I);", if(is.null(parameters$t0)) "T" else "T - t0", t0_args, K_args)
-      )
-    } else {
-      l_body <- c(
-        sprintf("vector[nS] v = calculate_v(%s);", paste(c(datsig(names_back = v_data, types = FALSE), parsig(v_pars, types = FALSE)), collapse=", ")),
-        sprintf("log_lik = tva_pr_log(R, S, D, %s, %s, %s, v);", if(is.null(parameters$t0)) "T" else "T - t0", t0_args, K_args)
-      )
-    }
+    l_body <- c(
+      sprintf("vector[nS] v = calculate_v(%s);", paste(c(datsig(names_back = v_data, types = FALSE), parsig(v_pars, types = FALSE)), collapse=", ")),
+      sprintf("log_lik = tva_pr_log(R, S, D, %s, %s, %s, v);", if(is.null(parameters$t0)) "T" else "T - t0", t0_args, K_args)
+    )
     p_data <- setdiff(l_data, "R")
     p_pars <- l_pars
     p_body <- c(
@@ -843,8 +849,8 @@ stantva_code <- function(formula = NULL, locations, task = c("wr","pr"), regions
   )
 
   # default parameter-unspecific priors
-  default_priors <- prior("normal(0.0,0.05)", "sd") +
-    prior("normal(0.0,0.1)", "sd", coef = "Intercept") +
+  default_priors <- prior("gamma(2.0,8.0)", "sd") +
+    prior("gamma(2.0,5.0))", "sd", coef = "Intercept") +
     prior("lkj_corr(0.8)", "cor") +
     prior("normal(0.0,5.0)") +
     prior("normal(0.0,10.0)", coef = "Intercept")
@@ -1098,6 +1104,8 @@ stantva_code <- function(formula = NULL, locations, task = c("wr","pr"), regions
             sprintf("// no prior for %s fixed slopes", name)
           )
         }
+      } else if(name %in% names(fixed)) {
+        sprintf("// prior ignored for fixed %s", name)
       } else {
         p <- get_prior(priors, "global", dpar=name)
         if(is.null(p)) sprintf("// no prior for global %s", name) else if(grepl("^simplex\\b", parameters[[name]]$type)) sprintf("%1$s[:%2$d]/%1$s[%3$d] ~ %4$s;", name, parameters[[name]]$dim-1, parameters[[name]]$dim, p) else sprintf("%s ~ %s;", name, p)
@@ -1328,7 +1336,7 @@ setClass("stantvafit", contains = "stanfit", slots = c("stanmodel" = "stantvamod
 setMethod("show", c(object="stantvamodel"), function(object) {
   cat(col_cyan("StanTVA"), "model with", length(object@code@df),"free parameter(s) and the following configuration:\n")
   for(cname in names(object@code@config)) {
-    cat(ansi_strwrap(paste0("- ",col_magenta(cname)," = ",deparse1(if(cname == "priors") deparse_prior(object@code@config$priors) else object@code@config[[cname]])), indent = 2, exdent = 6),sep="\n")
+    cat(ansi_strwrap(paste0("- ",col_magenta(cname)," = ",deparse1(object@code@config[[cname]])), indent = 2, exdent = 6),sep="\n")
   }
   invisible(object)
 })
@@ -1707,21 +1715,21 @@ predict.stantvafit <- function(object, newdata, variables = names(object@stanmod
       rfs <- fx$random[[which_formula]]
       par_dim <- object@stanmodel@code@dim[parname]
       par_df <- object@stanmodel@code@df[parname]
-      ps <- c("b", if(!is.null(rfs$group)) paste0("w_",rfs$group))
+      ps <- c("b", if(!is.null(rfs$group)) if(par_dim > 1) paste0("w_",rep(rfs$group, each = par_df),"_",seq_len(par_df)) else paste0("w_",rfs$group))
       p <- extract(as(object,"stanfit"), ps)
       r <- vapply(seq_len(par_dim), function(i) {
         m <- newdata[[if(par_dim > 1) paste0("map_",parname,"_",i) else paste0("map_",parname)]]
         if(i > par_df) return(matrix(1, (object@sim$iter-object@sim$warmup)*object@sim$chains, newdata$N))
         y <- tcrossprod(newdata$X[,m,drop=FALSE], p$b[,m,drop=FALSE])
         for(k in seq_len(nrow(rfs))) {
-          mrf <- newdata[[if(par_dim > 1) paste0("map_",parname,"_",i,"_",rfs$group[k]) else paste0("map_",parname,"_",rfs$group[k])]]
+          mrf <- newdata[[if(par_dim > 1) paste0("map_",parname,"_",i,"_",rfs$group[k],"_",i) else paste0("map_",parname,"_",rfs$group[k])]]
           for(j in seq_len(newdata[[paste0("N_",rfs$factor_txt[k])]])) {
             J <- newdata[[rfs$factor_txt[k]]] == j
             #print(which(J))
             #print(if(par_dim > 1) paste0("w_",rfs$group[k],"_",i) else paste0("w_",rfs$group[k]))
-            Z <- newdata[[paste0("Z_",rfs$group[k])]][J,mrf,drop=FALSE]
+            Z <- newdata[[if(par_dim > 1) paste0("Z_",rfs$group[k],"_",i) else paste0("Z_",rfs$group[k])]][J,mrf,drop=FALSE]
             #message(if(par_dim > 1) paste0("w_",rfs$group[k],"_",i) else paste0("w_",rfs$group[k]))
-            w <- as.matrix(p[[paste0("w_",rfs$group[k])]][,j,mrf,drop=TRUE])
+            w <- as.matrix(p[[if(par_dim > 1) paste0("w_",rfs$group[k],"_",i) else paste0("w_",rfs$group[k])]][,j,mrf,drop=TRUE])
             W <- tcrossprod(Z, w)
             #print(if(par_dim > 1) paste0("Z_",rfs$group[k],"_",i) else paste0("Z_",rfs$group[k]))
             #print(names(newdata))
@@ -1732,7 +1740,10 @@ predict.stantvafit <- function(object, newdata, variables = names(object@stanmod
         t(fx$inverse_link[[which_formula]](y))
       }, matrix(NA_real_, (object@sim$iter-object@sim$warmup)*object@sim$chains, newdata$N))
       if(par_dim > 1L && par_dim > par_df) {
-        rs <- do.call(cbind, apply(r, 2, rowSums, simplify = FALSE))
+        rs <- as.matrix(r[,,1])
+        for(i in seq_len(par_dim)[-1]) {
+          rs <- rs + r[,,i]
+        }
         for(i in seq_len(par_dim)) {
           r[,,i] <- r[,,i] / rs
         }
@@ -1783,10 +1794,9 @@ setMethod("fitted", "stantvafit", fitted.stantvafit)
 #' \donttest{tva_report(tva_recovery)}
 #' @export
 tva_report <- function(data) {
-  data %>% transmute(
-    condition = .data$condition,
-    exposure = .data$T,
+  data %>% mutate(
     score = as.integer(if(is.null(.data$D)) rowSums(.data$R & .data$S) else rowSums(.data$R & .data$S & !.data$D)),
+    error_rate = rowMeans(.data$S & (!.data$R & !.data$D | .data$D & .data$R)),
     n_items = as.integer(rowSums(.data$S == 1L)),
     n_distractors = if(is.null(.data$D)) integer(n()) else as.integer(rowSums(.data$D))
   ) %>% mutate(n_targets = .data$n_items - .data$n_distractors)
